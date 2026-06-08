@@ -555,7 +555,7 @@ function MPMenuScreen({ playerName, onBack, onRoomJoined, muted, onToggleMute })
 
   function joinRoom() {
     if (!code.trim()) { setError('Enter a room code'); return; }
-    connect(ws => ws.send(JSON.stringify({ type: 'JOIN_ROOM', code: code.toUpperCase(), name: playerName })));
+    connect(ws => ws.send(JSON.stringify({ type: 'JOIN_ROOM', code: code.trim(), name: playerName })));
   }
 
   return (
@@ -582,11 +582,11 @@ function MPMenuScreen({ playerName, onBack, onRoomJoined, muted, onToggleMute })
             <label>Room code</label>
             <input
               type="text"
-              placeholder="XXXX"
+              placeholder="12"
               value={code}
-              maxLength={4}
-              style={{ textTransform: 'uppercase', textAlign: 'center', letterSpacing: '6px', fontSize: '1.6rem' }}
-              onChange={e => setCode(e.target.value.toUpperCase())}
+              maxLength={2}
+              style={{ textAlign: 'center', letterSpacing: '6px', fontSize: '1.6rem' }}
+              onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
             />
             <button className="btn btn-primary" style={{ marginTop: '1rem', width: '100%' }} onClick={joinRoom} disabled={connecting}>
               {connecting ? 'Connecting…' : 'Join Room'}
