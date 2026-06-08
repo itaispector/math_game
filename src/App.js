@@ -49,7 +49,7 @@ let bgTimer = null;
 function startBgMusic() {
   if (bgActive) return;
   bgActive = true;
-  scheduleBg();
+  actx().resume().then(scheduleBg);
 }
 
 function stopBgMusic() {
@@ -1037,7 +1037,7 @@ export default function App() {
   function toggleMute() {
     setMuted(m => {
       if (!m) { stopBgMusic(); }
-      else { startBgMusic(); musicStarted.current = true; }
+      else { actx().resume().then(() => { startBgMusic(); musicStarted.current = true; }); }
       return !m;
     });
   }
