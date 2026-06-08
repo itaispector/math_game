@@ -19,10 +19,7 @@ const rooms = new Map();       // code -> room
 const clientRoom = new Map();  // ws -> code
 
 function makeCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let c = '';
-  for (let i = 0; i < 4; i++) c += chars[Math.floor(Math.random() * chars.length)];
-  return c;
+  return String(Math.floor(Math.random() * 90) + 10);
 }
 
 function randomJumps(count) {
