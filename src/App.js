@@ -10,6 +10,15 @@ function actx() {
   return _actx;
 }
 
+// iOS routes Web Audio to the earpiece (call session) by default.
+// Playing a silent <audio> element first switches the session to "media",
+// which routes all subsequent Web Audio output to the main speaker.
+const SILENT_WAV = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+function unlockIOSSpeaker() {
+  const a = new Audio(SILENT_WAV);
+  a.play().catch(() => {});
+}
+
 function note(freq, dur, type = 'sine', vol = 0.25, delay = 0) {
   try {
     const ctx = actx();
@@ -1027,6 +1036,7 @@ export default function App() {
     function tryStart() {
       if (!musicStarted.current && !muted) {
         musicStarted.current = true;
+        unlockIOSSpeaker();
         startBgMusic();
       }
     }
@@ -1037,7 +1047,7 @@ export default function App() {
   function toggleMute() {
     setMuted(m => {
       if (!m) { stopBgMusic(); }
-      else { actx().resume().then(() => { startBgMusic(); musicStarted.current = true; }); }
+      else { unlockIOSSpeaker(); actx().resume().then(() => { startBgMusic(); musicStarted.current = true; }); }
       return !m;
     });
   }
