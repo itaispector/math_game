@@ -51,18 +51,30 @@ const SFX = {
 };
 
 // Background music ─────────────────────────────────────────────────────────────
+// Uses a master gain node so mute/unmute just fades the gain rather than
+// stopping and restarting oscillators (which caused double-play on unmute).
+let bgGainNode = null;
 let bgActive = false;
 let bgTimer = null;
 
+function getBgGain() {
+  const ctx = actx();
+  if (!bgGainNode) {
+    bgGainNode = ctx.createGain();
+    bgGainNode.connect(ctx.destination);
+  }
+  return bgGainNode;
+}
+
 function startBgMusic() {
+  getBgGain().gain.value = 1;
   if (bgActive) return;
   bgActive = true;
   actx().resume().then(scheduleBg);
 }
 
 function stopBgMusic() {
-  bgActive = false;
-  if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
+  if (bgGainNode) bgGainNode.gain.value = 0;
 }
 
 function scheduleBg() {
@@ -86,7 +98,7 @@ function scheduleBg() {
         filt.frequency.value = 900;
         osc.connect(filt);
         filt.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(getBgGain());
         osc.frequency.value = freq;
         osc.type = 'triangle';
         const s = now + ci * beat * 4;
@@ -193,7 +205,7 @@ function CustomKeyboard({ value, onChange, onSubmit, disabled }) {
     if (value.length >= 6) return;
     onChange(value + k);
   }
-  const keys = ['7','8','9','4','5','6','1','2','3','←','0','✓'];
+  const keys = ['1','2','3','4','5','6','7','8','9','←','0','✓'];
   return (
     <div className="custom-kbd">
       <div className={`kbd-display ${disabled ? 'kbd-disabled' : ''}`}>
@@ -1054,6 +1066,7 @@ export default function App() {
   const [playerName, setPlayerName] = useState('');
   const [gameResult, setGameResult] = useState(null);
   const [muted, setMuted] = useState(false);
+  const [gameKey, setGameKey] = useState(0);
 
   const [mpWs, setMpWs] = useState(null);
   const [mpPlayerId, setMpPlayerId] = useState(null);
@@ -1076,7 +1089,7 @@ export default function App() {
   function toggleMute() {
     setMuted(m => {
       if (!m) { stopBgMusic(); }
-      else { unlockIOSSpeaker(); actx().resume().then(() => { startBgMusic(); musicStarted.current = true; }); }
+      else { startBgMusic(); }
       return !m;
     });
   }
@@ -1084,7 +1097,7 @@ export default function App() {
   const commonProps = { muted, onToggleMute: toggleMute };
 
   function handleName(name) { setPlayerName(name); setScreen('setup'); }
-  function handlePlay() { setScreen('game'); }
+  function handlePlay() { setGameKey(k => k + 1); setScreen('game'); }
   function handleGameOver(steps) { setGameResult({ steps }); setScreen('gameover'); }
 
   function handleMpRoomJoined(ws, pid, room) {
@@ -1112,13 +1125,13 @@ export default function App() {
   );
 
   if (screen === 'game') return (
-    <GameScreen key={Date.now()} playerName={playerName}
+    <GameScreen key={gameKey} playerName={playerName}
       onGameOver={handleGameOver} {...commonProps} />
   );
 
   if (screen === 'gameover') return (
     <GameOverScreen playerName={playerName} steps={gameResult.steps}
-      onPlayAgain={() => { setGameResult(null); setScreen('game'); }}
+      onPlayAgain={() => { setGameResult(null); setGameKey(k => k + 1); setScreen('game'); }}
       onMenu={() => { setGameResult(null); setScreen('setup'); }}
       {...commonProps} />
   );
