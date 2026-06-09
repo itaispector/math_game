@@ -259,6 +259,21 @@ function handleMsg(ws, msg) {
       break;
     }
 
+    case 'PLAY_AGAIN': {
+      const room = rooms.get(clientRoom.get(ws));
+      if (!room || room.state !== 'finished') return;
+      if (room.hostId !== ws.id) return;
+      room.state = 'lobby';
+      room.currentNumber = 0;
+      room.currentStep = 0;
+      room.currentPlayerIndex = 0;
+      room.currentJump = null;
+      room.currentTargetNumber = null;
+      room.players.forEach(p => { p.alive = true; });
+      broadcast(room, { type: 'ROOM_RESET', room: roomView(room) });
+      break;
+    }
+
     default: break;
   }
 }
