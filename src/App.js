@@ -227,12 +227,23 @@ function MuteBtn({ muted, onToggle }) {
 
 // ── cup shuffle ───────────────────────────────────────────────────────────────
 
-function CupShufflePhase({ onNumberRevealed, muted }) {
-  const [cups, setCups] = useState(() => [
-    { id: 0, number: randomInt(1, 99), pos: 0 },
-    { id: 1, number: randomInt(1, 99), pos: 1 },
-    { id: 2, number: randomInt(1, 99), pos: 2 },
-  ]);
+function uniqueRandomInts(min, max, count) {
+  const nums = new Set();
+  while (nums.size < count) nums.add(randomInt(min, max));
+  return [...nums];
+}
+
+function CupShufflePhase({ onNumberRevealed, muted, initialNumbers }) {
+  const [cups, setCups] = useState(() => {
+    const nums = (initialNumbers && initialNumbers.length === 3)
+      ? initialNumbers
+      : uniqueRandomInts(1, 99, 3);
+    return [
+      { id: 0, number: nums[0], pos: 0 },
+      { id: 1, number: nums[1], pos: 1 },
+      { id: 2, number: nums[2], pos: 2 },
+    ];
+  });
   const [subPhase, setSubPhase] = useState('reveal');
   const [liftedId, setLiftedId] = useState(null);
   const [xTransMs, setXTransMs] = useState(0);
@@ -289,7 +300,7 @@ function CupShufflePhase({ onNumberRevealed, muted }) {
     setTimeout(() => onNumberRevealed(cup.number), 900);
   }
 
-  const SLOT_W = 104;
+  const SLOT_W = 88;
   const STAGE_W = SLOT_W * 3 - 24;
 
   return (
@@ -330,10 +341,10 @@ function CupShufflePhase({ onNumberRevealed, muted }) {
               </div>
               <div
                 className="cup-body"
-                style={{ transform: isUp ? 'translateY(-130px)' : 'translateY(0)' }}
+                style={{ transform: isUp ? 'translateY(-110px)' : 'translateY(0)' }}
               >
                 <div className="cup-stripe cup-stripe-top" />
-                <div className="cup-star">✡</div>
+                <div className="cup-star">🇮🇱</div>
                 <div className="cup-stripe cup-stripe-bottom" />
               </div>
             </div>
@@ -807,6 +818,7 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
   const [lastEvent, setLastEvent] = useState('');
   const [mpPhase, setMpPhase] = useState('cups'); // 'cups' | 'playing'
   const [currentJump, setCurrentJump] = useState(null);
+  const [mpCupNumbers, setMpCupNumbers] = useState(null);
 
   const timerRef = useRef(null);
   const isMyTurn = activePlayerId === playerId;
@@ -845,6 +857,7 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
           setInput('');
           setLastEvent('');
           setMpPhase('cups');
+          setMpCupNumbers(msg.cupNumbers || null);
           clearInterval(timerRef.current);
           setTimeLeft(1);
           if (msg.currentPlayerId === playerId && !muted) SFX.gameStart();
@@ -966,7 +979,7 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
         <div className="big-number">{currentNumber}</div>
 
         {mpPhase === 'cups' && isMyTurn && !eliminated && (
-          <CupShufflePhase key={currentStep} onNumberRevealed={handleCupPicked} muted={muted} />
+          <CupShufflePhase key={currentStep} onNumberRevealed={handleCupPicked} muted={muted} initialNumbers={mpCupNumbers} />
         )}
 
         {mpPhase === 'playing' && currentJump !== null && (

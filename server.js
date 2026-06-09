@@ -23,7 +23,9 @@ function makeCode() {
 }
 
 function randomTurnNumbers() {
-  return Array.from({ length: 3 }, () => Math.floor(Math.random() * 99) + 1);
+  const nums = new Set();
+  while (nums.size < 3) nums.add(Math.floor(Math.random() * 99) + 1);
+  return [...nums];
 }
 
 function roomView(room) {
