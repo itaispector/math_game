@@ -957,3 +957,113 @@ input.error {
   .screen { padding: 0.75rem; }
   .card   { padding: 1.5rem 1rem; }
 }
+
+/* ── game select ─────────────────────────────────────────────────────────── */
+
+.game-select-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.25rem 0;
+}
+
+.game-select-card {
+  background: rgba(255,255,255,0.04);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 1.5rem 0.75rem;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.15s, background 0.2s;
+  text-align: center;
+  color: white;
+  font-family: inherit;
+}
+
+.game-select-card:hover,
+.game-select-card:focus {
+  border-color: rgba(167,139,250,0.5);
+  background: rgba(167,139,250,0.08);
+  transform: translateY(-2px);
+  outline: none;
+}
+
+.game-select-card:active { transform: scale(0.97); }
+
+.game-select-icon {
+  font-size: 2.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.game-select-name {
+  font-family: 'Orbitron', monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 0.3rem;
+}
+
+.game-select-desc {
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.38);
+  font-family: 'Rajdhani', sans-serif;
+  line-height: 1.4;
+}
+
+/* ── memory game ─────────────────────────────────────────────────────────── */
+
+.memory-number-display {
+  font-family: 'Orbitron', monospace;
+  font-size: 2.2rem;
+  font-weight: 900;
+  color: #60a5fa;
+  text-align: center;
+  letter-spacing: 0.1em;
+  padding: 1.25rem 0.5rem;
+  text-shadow: 0 0 24px rgba(96,165,250,0.45);
+  transform-origin: center center;
+}
+
+.memory-number-shrink {
+  animation: memory-shrink 0.5s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@keyframes memory-shrink {
+  0%   { transform: scale(1);    opacity: 1; }
+  100% { transform: scale(0.05); opacity: 0; }
+}
+
+.memory-turn-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'Orbitron', monospace;
+  font-size: 0.75rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.38);
+  margin-bottom: 0.25rem;
+}
+
+.memory-countdown-badge {
+  background: rgba(251,191,36,0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(251,191,36,0.3);
+  border-radius: 8px;
+  padding: 0.15rem 0.65rem;
+  font-family: 'Orbitron', monospace;
+  font-weight: 900;
+  font-size: 1rem;
+  min-width: 2.5ch;
+  text-align: center;
+}
+
+.memory-input-prompt {
+  text-align: center;
+  color: rgba(255,255,255,0.48);
+  font-size: 0.8rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 0.75rem;
+  font-family: 'Orbitron', monospace;
+}

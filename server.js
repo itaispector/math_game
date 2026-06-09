@@ -28,11 +28,18 @@ function randomTurnNumbers() {
   return [...nums];
 }
 
+function randomNDigitNumber(n) {
+  const min = Math.pow(10, n - 1);
+  const max = Math.pow(10, n) - 1;
+  return String(Math.floor(Math.random() * (max - min + 1)) + min);
+}
+
 function roomView(room) {
   return {
     code: room.code,
     state: room.state,
     hostId: room.hostId,
+    gameType: room.gameType || 'jumpmath',
     players: room.players.map(p => ({ id: p.id, name: p.name, alive: p.alive })),
     currentPlayerIndex: room.currentPlayerIndex,
     currentNumber: room.currentNumber,
@@ -73,17 +80,28 @@ function checkGameOver(room) {
 
 function broadcastTurnStart(room, delay) {
   setTimeout(() => {
-    const cupNumbers = randomTurnNumbers();
-    room.currentCupNumbers = cupNumbers;
-    room.currentJump = null;
-    broadcast(room, {
+    const currentPlayer = room.players[room.currentPlayerIndex];
+    const msg = {
       type: 'TURN_START',
-      currentPlayerId: room.players[room.currentPlayerIndex].id,
-      currentNumber: room.currentNumber,
+      currentPlayerId: currentPlayer.id,
       currentStep: room.currentStep,
-      cupNumbers,
       room: roomView(room),
-    });
+    };
+
+    if (room.gameType === 'memoryman') {
+      const digits = room.currentStep + 2;
+      const targetNumber = randomNDigitNumber(digits);
+      room.currentTargetNumber = targetNumber;
+      msg.targetNumber = targetNumber;
+    } else {
+      const cupNumbers = randomTurnNumbers();
+      room.currentCupNumbers = cupNumbers;
+      room.currentJump = null;
+      msg.currentNumber = room.currentNumber;
+      msg.cupNumbers = cupNumbers;
+    }
+
+    broadcast(room, msg);
   }, delay);
 }
 
@@ -110,9 +128,10 @@ function handleMsg(ws, msg) {
       const player = { id: ws.id, name: msg.name || 'Player', ws, alive: true };
       const room = {
         code, state: 'lobby', hostId: ws.id,
+        gameType: msg.gameType || 'jumpmath',
         players: [player],
         currentPlayerIndex: 0, currentNumber: 0, currentStep: 0,
-        currentJump: null, currentCupNumbers: [],
+        currentJump: null, currentCupNumbers: [], currentTargetNumber: null,
       };
       rooms.set(code, room);
       clientRoom.set(ws, code);
@@ -193,6 +212,34 @@ function handleMsg(ws, msg) {
       break;
     }
 
+    case 'MEMORY_SUBMIT_ANSWER': {
+      const room = rooms.get(clientRoom.get(ws));
+      if (!room || room.state !== 'playing' || room.gameType !== 'memoryman') return;
+      const cur = room.players[room.currentPlayerIndex];
+      if (!cur || cur.id !== ws.id || !room.currentTargetNumber) return;
+
+      const correct = msg.answer === room.currentTargetNumber;
+      room.currentTargetNumber = null;
+
+      if (correct) {
+        room.currentStep++;
+        broadcast(room, { type: 'ANSWER_RESULT', correct: true, playerId: ws.id, room: roomView(room) });
+        advanceTurn(room);
+        broadcastTurnStart(room, 600);
+      } else {
+        cur.alive = false;
+        broadcast(room, { type: 'ANSWER_RESULT', correct: false, playerId: ws.id, room: roomView(room) });
+        const winner = checkGameOver(room);
+        if (winner) {
+          setTimeout(() => broadcast(room, { type: 'GAME_OVER', winnerId: winner.id, room: roomView(room) }), 800);
+        } else {
+          advanceTurn(room);
+          broadcastTurnStart(room, 800);
+        }
+      }
+      break;
+    }
+
     case 'TIMEOUT': {
       const room = rooms.get(clientRoom.get(ws));
       if (!room || room.state !== 'playing') return;
@@ -200,6 +247,7 @@ function handleMsg(ws, msg) {
       if (!cur || cur.id !== ws.id) return;
       cur.alive = false;
       room.currentJump = null;
+      room.currentTargetNumber = null;
       broadcast(room, { type: 'PLAYER_TIMEOUT', playerId: ws.id, room: roomView(room) });
       const winner = checkGameOver(room);
       if (winner) {
