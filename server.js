@@ -22,8 +22,8 @@ function makeCode() {
   return String(Math.floor(Math.random() * 90) + 10);
 }
 
-function randomJumps(count) {
-  return Array.from({ length: count }, () => Math.floor(Math.random() * 26) + 5);
+function randomTurnNumbers() {
+  return Array.from({ length: 3 }, () => Math.floor(Math.random() * 99) + 1);
 }
 
 function roomView(room) {
@@ -32,12 +32,9 @@ function roomView(room) {
     state: room.state,
     hostId: room.hostId,
     players: room.players.map(p => ({ id: p.id, name: p.name, alive: p.alive })),
-    jumpCount: room.jumpCount,
-    jumpValues: room.jumpValues,
     currentPlayerIndex: room.currentPlayerIndex,
     currentNumber: room.currentNumber,
     currentStep: room.currentStep,
-    votes: room.votes,
   };
 }
 
@@ -72,6 +69,22 @@ function checkGameOver(room) {
   return null;
 }
 
+function broadcastTurnStart(room, delay) {
+  setTimeout(() => {
+    const cupNumbers = randomTurnNumbers();
+    room.currentCupNumbers = cupNumbers;
+    room.currentJump = null;
+    broadcast(room, {
+      type: 'TURN_START',
+      currentPlayerId: room.players[room.currentPlayerIndex].id,
+      currentNumber: room.currentNumber,
+      currentStep: room.currentStep,
+      cupNumbers,
+      room: roomView(room),
+    });
+  }, delay);
+}
+
 wss.on('connection', (ws) => {
   ws.id = Math.random().toString(36).slice(2, 11);
 
@@ -96,9 +109,8 @@ function handleMsg(ws, msg) {
       const room = {
         code, state: 'lobby', hostId: ws.id,
         players: [player],
-        jumpCount: 3, jumpValues: [],
         currentPlayerIndex: 0, currentNumber: 0, currentStep: 0,
-        votes: {},
+        currentJump: null, currentCupNumbers: [],
       };
       rooms.set(code, room);
       clientRoom.set(ws, code);
@@ -120,58 +132,31 @@ function handleMsg(ws, msg) {
       break;
     }
 
-    case 'SET_JUMPS': {
-      const room = rooms.get(clientRoom.get(ws));
-      if (!room || room.hostId !== ws.id || room.state === 'playing') return;
-      room.jumpCount = Math.max(1, Math.min(6, Number(msg.jumpCount) || 3));
-      room.votes = {};
-      room.state = 'voting';
-      broadcast(room, { type: 'VOTE_REQUEST', room: roomView(room) });
-      break;
-    }
-
-    case 'VOTE': {
-      const room = rooms.get(clientRoom.get(ws));
-      if (!room || room.state !== 'voting' || room.hostId === ws.id) return;
-      room.votes[ws.id] = !!msg.approve;
-      const nonHost = room.players.filter(p => p.id !== room.hostId);
-      const allVoted = nonHost.every(p => room.votes[p.id] !== undefined);
-      if (allVoted) {
-        const approved = nonHost.every(p => room.votes[p.id]);
-        if (approved) {
-          room.state = 'approved';
-        } else {
-          room.state = 'lobby';
-          room.votes = {};
-        }
-        broadcast(room, { type: 'VOTE_RESULT', approved, room: roomView(room) });
-      } else {
-        broadcast(room, { type: 'ROOM_UPDATE', room: roomView(room) });
-      }
-      break;
-    }
-
     case 'START_GAME': {
       const room = rooms.get(clientRoom.get(ws));
       if (!room || room.hostId !== ws.id) return;
-      if (room.state !== 'approved' && room.state !== 'lobby') return;
-      room.jumpValues = randomJumps(room.jumpCount);
+      if (room.state !== 'lobby') return;
       room.state = 'playing';
       room.currentNumber = 0;
       room.currentStep = 0;
       room.currentPlayerIndex = 0;
+      room.currentJump = null;
       room.players.forEach(p => { p.alive = true; });
-      room.votes = {};
       broadcast(room, { type: 'GAME_STARTED', room: roomView(room) });
-      setTimeout(() => {
-        broadcast(room, {
-          type: 'TURN_START',
-          currentPlayerId: room.players[0].id,
-          currentNumber: 0,
-          currentStep: 0,
-          room: roomView(room),
-        });
-      }, 300);
+      broadcastTurnStart(room, 300);
+      break;
+    }
+
+    case 'CUP_PICKED': {
+      const room = rooms.get(clientRoom.get(ws));
+      if (!room || room.state !== 'playing') return;
+      const cur = room.players[room.currentPlayerIndex];
+      if (!cur || cur.id !== ws.id) return;
+      if (room.currentJump !== null) return;
+      const number = Number(msg.number);
+      if (!room.currentCupNumbers.includes(number)) return;
+      room.currentJump = number;
+      broadcast(room, { type: 'CUP_REVEALED', number, room: roomView(room) });
       break;
     }
 
@@ -180,25 +165,18 @@ function handleMsg(ws, msg) {
       if (!room || room.state !== 'playing') return;
       const cur = room.players[room.currentPlayerIndex];
       if (!cur || cur.id !== ws.id) return;
+      if (room.currentJump === null) return;
 
-      const jump = room.jumpValues[room.currentStep % room.jumpCount];
-      const expected = room.currentNumber + jump;
+      const expected = room.currentNumber + room.currentJump;
       const correct = Number(msg.answer) === expected;
 
       if (correct) {
         room.currentNumber = expected;
         room.currentStep++;
+        room.currentJump = null;
         broadcast(room, { type: 'ANSWER_RESULT', correct: true, playerId: ws.id, newNumber: room.currentNumber, room: roomView(room) });
         advanceTurn(room);
-        setTimeout(() => {
-          broadcast(room, {
-            type: 'TURN_START',
-            currentPlayerId: room.players[room.currentPlayerIndex].id,
-            currentNumber: room.currentNumber,
-            currentStep: room.currentStep,
-            room: roomView(room),
-          });
-        }, 600);
+        broadcastTurnStart(room, 600);
       } else {
         cur.alive = false;
         broadcast(room, { type: 'ANSWER_RESULT', correct: false, playerId: ws.id, room: roomView(room) });
@@ -207,15 +185,7 @@ function handleMsg(ws, msg) {
           setTimeout(() => broadcast(room, { type: 'GAME_OVER', winnerId: winner.id, room: roomView(room) }), 800);
         } else {
           advanceTurn(room);
-          setTimeout(() => {
-            broadcast(room, {
-              type: 'TURN_START',
-              currentPlayerId: room.players[room.currentPlayerIndex].id,
-              currentNumber: room.currentNumber,
-              currentStep: room.currentStep,
-              room: roomView(room),
-            });
-          }, 800);
+          broadcastTurnStart(room, 800);
         }
       }
       break;
@@ -227,21 +197,14 @@ function handleMsg(ws, msg) {
       const cur = room.players[room.currentPlayerIndex];
       if (!cur || cur.id !== ws.id) return;
       cur.alive = false;
+      room.currentJump = null;
       broadcast(room, { type: 'PLAYER_TIMEOUT', playerId: ws.id, room: roomView(room) });
       const winner = checkGameOver(room);
       if (winner) {
         setTimeout(() => broadcast(room, { type: 'GAME_OVER', winnerId: winner.id, room: roomView(room) }), 800);
       } else {
         advanceTurn(room);
-        setTimeout(() => {
-          broadcast(room, {
-            type: 'TURN_START',
-            currentPlayerId: room.players[room.currentPlayerIndex].id,
-            currentNumber: room.currentNumber,
-            currentStep: room.currentStep,
-            room: roomView(room),
-          });
-        }, 800);
+        broadcastTurnStart(room, 800);
       }
       break;
     }
@@ -266,7 +229,6 @@ function handleLeave(ws, notify) {
 
   if (notify) {
     if (room.state === 'playing') {
-      // Fix currentPlayerIndex after splice
       if (room.currentPlayerIndex >= room.players.length) room.currentPlayerIndex = 0;
       const winner = checkGameOver(room);
       if (winner) {

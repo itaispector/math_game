@@ -36,10 +36,9 @@ const SFX = {
   gameWin:      () => [523, 659, 784, 1047, 784, 1047].forEach((f, i) => note(f, 0.15, 'sine', 0.28, i * 0.1)),
   playerJoined: () => { note(880, 0.08, 'sine', 0.12); note(1100, 0.12, 'sine', 0.12, 0.08); },
   playerLeft:   () => { note(440, 0.1, 'sine', 0.1); note(330, 0.15, 'sine', 0.08, 0.1); },
-  vote:         () => note(660, 0.1, 'sine', 0.15),
-  approved:     () => { note(523, 0.1, 'sine', 0.2); note(784, 0.2, 'sine', 0.25, 0.1); },
-  rejected:     () => note(200, 0.35, 'sawtooth', 0.2),
   tick:         () => note(800, 0.04, 'square', 0.06),
+  cupSwap:      () => note(380, 0.07, 'sine', 0.09),
+  cupReveal:    () => { note(880, 0.1, 'sine', 0.2); note(1100, 0.18, 'sine', 0.22, 0.1); },
 };
 
 // Background music ─────────────────────────────────────────────────────────────
@@ -63,10 +62,10 @@ function scheduleBg() {
     const ctx = actx();
     const beat = 0.5;
     const chords = [
-      [220, 277, 330],   // Am
-      [175, 220, 262],   // F
-      [131, 165, 196],   // C
-      [196, 247, 294],   // G
+      [220, 277, 330],
+      [175, 220, 262],
+      [131, 165, 196],
+      [196, 247, 294],
     ];
     const now = ctx.currentTime;
     chords.forEach((chord, ci) => {
@@ -144,11 +143,11 @@ function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function calcScore(steps, jumps) {
-  return Math.round(steps * jumps * 10);
+function calcScore(steps) {
+  return steps * 10;
 }
 
-const LS_KEY = 'mathgame_scores_v1';
+const LS_KEY = 'mathgame_scores_v2';
 
 function loadScores() {
   try { return JSON.parse(localStorage.getItem(LS_KEY)) || []; }
@@ -164,7 +163,6 @@ function saveScore(entry) {
   return top;
 }
 
-// Timer: starts at 15s, decreases 0.4s every step, floor 3s
 function getTimerDuration(step) {
   return Math.max(3000, 15000 - step * 400);
 }
@@ -218,6 +216,125 @@ function MuteBtn({ muted, onToggle }) {
   );
 }
 
+// ── cup shuffle ───────────────────────────────────────────────────────────────
+
+function CupShufflePhase({ onNumberRevealed, muted }) {
+  const [cups, setCups] = useState(() => [
+    { id: 0, number: randomInt(1, 99), pos: 0 },
+    { id: 1, number: randomInt(1, 99), pos: 1 },
+    { id: 2, number: randomInt(1, 99), pos: 2 },
+  ]);
+  const [subPhase, setSubPhase] = useState('reveal');
+  const [liftedId, setLiftedId] = useState(null);
+  const [xTransMs, setXTransMs] = useState(0);
+
+  // Use ref so shuffle effect doesn't re-run when muted toggles
+  const mutedRef = useRef(muted);
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
+
+  useEffect(() => {
+    if (subPhase === 'reveal') {
+      const t = setTimeout(() => setSubPhase('cover'), 1200);
+      return () => clearTimeout(t);
+    }
+    if (subPhase === 'cover') {
+      const t = setTimeout(() => setSubPhase('shuffle'), 500);
+      return () => clearTimeout(t);
+    }
+    if (subPhase === 'shuffle') {
+      const numSwaps = 5 + Math.floor(Math.random() * 3);
+      const swapMs = 260;
+      const timers = [];
+      let delay = 100;
+
+      for (let i = 0; i < numSwaps; i++) {
+        const d = delay;
+        timers.push(setTimeout(() => {
+          if (!mutedRef.current) SFX.cupSwap();
+          let pA = Math.floor(Math.random() * 3);
+          let pB;
+          do { pB = Math.floor(Math.random() * 3); } while (pB === pA);
+          setXTransMs(swapMs);
+          setCups(prev => prev.map(c => ({
+            ...c,
+            pos: c.pos === pA ? pB : c.pos === pB ? pA : c.pos,
+          })));
+        }, d));
+        delay += swapMs + 70;
+      }
+
+      timers.push(setTimeout(() => {
+        setXTransMs(0);
+        setSubPhase('pick');
+      }, delay + 200));
+
+      return () => timers.forEach(clearTimeout);
+    }
+  }, [subPhase]);
+
+  function pickCup(cup) {
+    if (subPhase !== 'pick') return;
+    if (!mutedRef.current) SFX.cupReveal();
+    setLiftedId(cup.id);
+    setSubPhase('unveil');
+    setTimeout(() => onNumberRevealed(cup.number), 900);
+  }
+
+  const SLOT_W = 104;
+  const STAGE_W = SLOT_W * 3 - 24;
+
+  return (
+    <div className="cup-shuffle-area">
+      <div className="cup-phase-label">
+        {subPhase === 'reveal' && 'Remember the numbers!'}
+        {subPhase === 'cover' && 'Watch closely…'}
+        {subPhase === 'shuffle' && 'Follow the cups!'}
+        {subPhase === 'pick' && '🎯 Pick a cup!'}
+        {subPhase === 'unveil' && liftedId !== null && (
+          <span className="cup-unveil-num">
+            +{cups.find(c => c.id === liftedId)?.number}
+          </span>
+        )}
+      </div>
+
+      <div className="cup-stage" style={{ width: STAGE_W }}>
+        {cups.map(cup => {
+          const isUp = subPhase === 'reveal' || (subPhase === 'unveil' && cup.id === liftedId);
+          const isPickable = subPhase === 'pick';
+
+          return (
+            <div
+              key={cup.id}
+              className={`cup-wrapper${isPickable ? ' cup-pickable' : ''}`}
+              style={{
+                position: 'absolute',
+                left: cup.pos * SLOT_W,
+                transition: `left ${xTransMs}ms ease-in-out`,
+              }}
+              onClick={() => isPickable && pickCup(cup)}
+            >
+              <div
+                className="cup-number"
+                style={{ opacity: isUp ? 1 : 0, transition: 'opacity 0.3s' }}
+              >
+                {cup.number}
+              </div>
+              <div
+                className="cup-body"
+                style={{ transform: isUp ? 'translateY(-130px)' : 'translateY(0)' }}
+              >
+                <div className="cup-stripe cup-stripe-top" />
+                <div className="cup-star">✡</div>
+                <div className="cup-stripe cup-stripe-bottom" />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── solo screens ──────────────────────────────────────────────────────────────
 
 function NameScreen({ onStart, muted, onToggleMute }) {
@@ -254,7 +371,6 @@ function NameScreen({ onStart, muted, onToggleMute }) {
 }
 
 function SetupScreen({ playerName, onPlay, onScores, onMultiplayer, muted, onToggleMute }) {
-  const [jumps, setJumps] = useState(1);
   const scores = loadScores().slice(0, 3);
 
   return (
@@ -265,21 +381,11 @@ function SetupScreen({ playerName, onPlay, onScores, onMultiplayer, muted, onTog
         <div className="game-title">JUMP MATH</div>
         <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
           <span style={{ color: '#a78bfa', fontFamily: 'Orbitron', fontWeight: 700 }}>{playerName}</span>
-          <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.85rem' }}> — choose difficulty</span>
+          <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.85rem' }}> — ready to play?</span>
         </div>
 
-        <label style={{ textAlign: 'center', display: 'block' }}>Number of jumps</label>
-        <div className="jump-counter">
-          <button className="jump-btn" onClick={() => setJumps(j => Math.max(1, j - 1))} disabled={jumps <= 1}>−</button>
-          <div className="jump-value">{jumps}</div>
-          <button className="jump-btn" onClick={() => setJumps(j => Math.min(6, j + 1))} disabled={jumps >= 6}>+</button>
-        </div>
-        <div className="jump-label">
-          {jumps === 1 ? 'Easy' : jumps === 2 ? 'Medium' : jumps <= 4 ? 'Hard' : 'Insane'} · {jumps} jump{jumps > 1 ? 's' : ''}
-        </div>
-
-        <button className="btn btn-primary" onClick={() => { SFX.gameStart(); onPlay(jumps); }}>
-          🎲 Randomize &amp; Play
+        <button className="btn btn-primary" onClick={() => { SFX.gameStart(); onPlay(); }}>
+          🎲 Play
         </button>
 
         <button className="btn btn-mp" style={{ marginTop: '0.75rem', width: '100%' }} onClick={onMultiplayer}>
@@ -300,7 +406,7 @@ function SetupScreen({ playerName, onPlay, onScores, onMultiplayer, muted, onTog
                   <div className="score-name">{s.name}</div>
                   <div>
                     <div className="score-pts">{s.score}</div>
-                    <div className="score-meta">{s.jumps}j · {s.steps} steps</div>
+                    <div className="score-meta">{s.steps} steps</div>
                   </div>
                 </div>
               ))}
@@ -315,10 +421,7 @@ function SetupScreen({ playerName, onPlay, onScores, onMultiplayer, muted, onTog
   );
 }
 
-function GameScreen({ playerName, jumpCount, onGameOver, muted, onToggleMute }) {
-  const [jumpValues] = useState(() =>
-    Array.from({ length: jumpCount }, () => randomInt(5, 30))
-  );
+function GameScreen({ playerName, onGameOver, muted, onToggleMute }) {
   const [current, setCurrent] = useState(0);
   const [step, setStep] = useState(0);
   const [input, setInput] = useState('');
@@ -327,58 +430,65 @@ function GameScreen({ playerName, jumpCount, onGameOver, muted, onToggleMute }) 
   const [confetti, setConfetti] = useState(false);
   const [timeLeft, setTimeLeft] = useState(1);
   const [rawTime, setRawTime] = useState(0);
+  const [gamePhase, setGamePhase] = useState('cups'); // 'cups' | 'playing'
+  const [currentJump, setCurrentJump] = useState(null);
 
   const timerRef = useRef(null);
-  const startRef = useRef(Date.now());
   const durationRef = useRef(getTimerDuration(0));
-  const prevSecRef = useRef(null);
 
-  const nextJump = jumpValues[step % jumpCount];
-  const expectedAnswer = current + nextJump;
+  useEffect(() => () => clearInterval(timerRef.current), []);
 
-  const endGame = useCallback((stepsCompleted) => {
+  function endGame(stepsCompleted) {
     clearInterval(timerRef.current);
     if (!muted) SFX.gameFail();
-    onGameOver(stepsCompleted, jumpValues);
-  }, [onGameOver, jumpValues, muted]);
+    onGameOver(stepsCompleted);
+  }
 
-  useEffect(() => {
-    startRef.current = Date.now();
-    durationRef.current = getTimerDuration(step);
-    setRawTime(durationRef.current);
-    prevSecRef.current = null;
+  function startPlayingTimer(forStep) {
+    clearInterval(timerRef.current);
+    const dur = getTimerDuration(forStep);
+    durationRef.current = dur;
+    const start = Date.now();
+    let prevSec = null;
+    setRawTime(dur);
+    setTimeLeft(1);
 
     timerRef.current = setInterval(() => {
-      const elapsed = Date.now() - startRef.current;
-      const remaining = Math.max(0, durationRef.current - elapsed);
-      setTimeLeft(remaining / durationRef.current);
+      const elapsed = Date.now() - start;
+      const remaining = Math.max(0, dur - elapsed);
+      setTimeLeft(remaining / dur);
       setRawTime(remaining);
-      // tick when each second crosses
       const sec = Math.ceil(remaining / 1000);
-      if (prevSecRef.current !== null && sec !== prevSecRef.current && remaining > 0 && !muted) {
-        if (remaining / durationRef.current < 0.4) SFX.tick();
+      if (prevSec !== null && sec !== prevSec && remaining > 0 && !muted) {
+        if (remaining / dur < 0.4) SFX.tick();
       }
-      prevSecRef.current = sec;
-      if (remaining <= 0) { clearInterval(timerRef.current); endGame(step); }
+      prevSec = sec;
+      if (remaining <= 0) { clearInterval(timerRef.current); endGame(forStep); }
     }, 60);
+  }
 
-    return () => clearInterval(timerRef.current);
-  }, [step, endGame, muted]);
-
-  function handleInput(val) { setInput(val); }
+  function handleNumberRevealed(num) {
+    setCurrentJump(num);
+    setGamePhase('playing');
+    startPlayingTimer(step);
+  }
 
   function handleSubmit() {
+    if (gamePhase !== 'playing' || currentJump === null) return;
     const val = parseInt(input, 10);
     if (isNaN(val)) return;
-    if (val === expectedAnswer) {
+    const expected = current + currentJump;
+    if (val === expected) {
       clearInterval(timerRef.current);
       if (!muted) SFX.correct();
       setFlashCorrect(true);
       setConfetti(true);
       setTimeout(() => { setFlashCorrect(false); setConfetti(false); }, 500);
-      setCurrent(expectedAnswer);
+      setCurrent(expected);
       setInput('');
       setStep(s => s + 1);
+      setGamePhase('cups');
+      setCurrentJump(null);
     } else {
       if (!muted) SFX.wrong();
       setInputErr(true);
@@ -387,7 +497,6 @@ function GameScreen({ playerName, jumpCount, onGameOver, muted, onToggleMute }) 
   }
 
   const timerSecs = (rawTime / 1000).toFixed(1);
-  const dur = durationRef.current / 1000;
   const barColor = timerColor(timeLeft);
 
   return (
@@ -400,46 +509,44 @@ function GameScreen({ playerName, jumpCount, onGameOver, muted, onToggleMute }) 
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
           <div className="stat-label">Player: <span style={{ color: '#a78bfa', fontFamily: 'Orbitron', fontSize: '0.85rem' }}>{playerName}</span></div>
-          <div className="stat-label">Score: <span style={{ color: '#60a5fa', fontFamily: 'Orbitron', fontSize: '0.85rem' }}>{calcScore(step, jumpCount)}</span></div>
+          <div className="stat-label">Score: <span style={{ color: '#60a5fa', fontFamily: 'Orbitron', fontSize: '0.85rem' }}>{calcScore(step)}</span></div>
         </div>
 
-        <div className="timer-container">
-          <div className="timer-meta">
-            <span>Time</span>
-            <span style={{ color: barColor, fontFamily: 'Orbitron', fontWeight: 700 }}>{timerSecs}s</span>
-          </div>
-          <div className="timer-bar-bg">
-            <div className="timer-bar" style={{ width: `${timeLeft * 100}%`, background: barColor }} />
-          </div>
-          <div className="speed-indicator" style={{ color: 'rgba(255,255,255,0.25)' }}>
-            Limit: {dur.toFixed(1)}s — step {step + 1}
-          </div>
-        </div>
-
-        <div style={{ textAlign: 'center', fontSize: '0.75rem', letterSpacing: '2px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)', marginBottom: '0.4rem' }}>
-          Jump pattern
-        </div>
-        <div className="jumps-display">
-          {jumpValues.map((v, i) => (
-            <div key={i} className="jump-chip" style={i === step % jumpCount ? { borderColor: '#60a5fa', color: '#60a5fa', background: 'rgba(96,165,250,0.15)' } : {}}>
-              +{v}
+        {gamePhase === 'playing' && (
+          <div className="timer-container">
+            <div className="timer-meta">
+              <span>Time</span>
+              <span style={{ color: barColor, fontFamily: 'Orbitron', fontWeight: 700 }}>{timerSecs}s</span>
             </div>
-          ))}
-        </div>
+            <div className="timer-bar-bg">
+              <div className="timer-bar" style={{ width: `${timeLeft * 100}%`, background: barColor }} />
+            </div>
+            <div className="speed-indicator" style={{ color: 'rgba(255,255,255,0.25)' }}>
+              Limit: {(durationRef.current / 1000).toFixed(1)}s — step {step + 1}
+            </div>
+          </div>
+        )}
 
         <div className="current-number-label">Current total</div>
         <div className="big-number">{current}</div>
 
-        <div className="next-prompt">
-          Add <strong>+{nextJump}</strong> → what is the next number?
-        </div>
+        {gamePhase === 'cups' && (
+          <CupShufflePhase key={step} onNumberRevealed={handleNumberRevealed} muted={muted} />
+        )}
 
-        <CustomKeyboard
-          value={input}
-          onChange={handleInput}
-          onSubmit={handleSubmit}
-          disabled={inputErr}
-        />
+        {gamePhase === 'playing' && (
+          <>
+            <div className="next-prompt">
+              Add <strong>+{currentJump}</strong> → what is the next number?
+            </div>
+            <CustomKeyboard
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSubmit}
+              disabled={inputErr}
+            />
+          </>
+        )}
 
         <div className="streak" style={{ marginTop: '0.75rem' }}>
           {step > 0 && <><span>{step}</span> correct so far 🔥</>}
@@ -449,9 +556,9 @@ function GameScreen({ playerName, jumpCount, onGameOver, muted, onToggleMute }) 
   );
 }
 
-function GameOverScreen({ playerName, steps, jumpCount, jumpValues, onPlayAgain, onMenu, muted, onToggleMute }) {
-  const score = calcScore(steps, jumpCount);
-  const allScores = useRef(saveScore({ name: playerName, score, steps, jumps: jumpCount, date: new Date().toLocaleDateString() }));
+function GameOverScreen({ playerName, steps, onPlayAgain, onMenu, muted, onToggleMute }) {
+  const score = calcScore(steps);
+  const allScores = useRef(saveScore({ name: playerName, score, steps, date: new Date().toLocaleDateString() }));
   const rank = allScores.current.findIndex(s => s.name === playerName && s.score === score && s.steps === steps) + 1;
   const isNewRecord = rank === 1;
 
@@ -467,11 +574,6 @@ function GameOverScreen({ playerName, steps, jumpCount, jumpValues, onPlayAgain,
         <div className="divider" />
         <div className="stat-row"><span className="stat-label">Player</span><span className="stat-value">{playerName}</span></div>
         <div className="stat-row"><span className="stat-label">Steps</span><span className="stat-value">{steps}</span></div>
-        <div className="stat-row">
-          <span className="stat-label">Jumps</span>
-          <span className="stat-value">{jumpValues.map((v, i) => <span key={i} className="jump-chip" style={{ marginLeft: i > 0 ? 4 : 0 }}>+{v}</span>)}</span>
-        </div>
-        <div className="stat-row"><span className="stat-label">Difficulty</span><span className="stat-value">{jumpCount} jump{jumpCount > 1 ? 's' : ''}</span></div>
         {rank > 0 && <div className="stat-row"><span className="stat-label">Rank</span><span className="stat-value" style={{ color: rank === 1 ? '#fbbf24' : rank <= 3 ? '#94a3b8' : '#a78bfa' }}>#{rank}</span></div>}
         <div className="btn-row">
           <button className="btn btn-primary" onClick={onPlayAgain}>Play Again</button>
@@ -506,7 +608,7 @@ function ScoresScreen({ onBack, muted, onToggleMute }) {
                   <div style={{ flex: 1 }} />
                   <div style={{ textAlign: 'right' }}>
                     <div className="score-pts">{s.score}</div>
-                    <div className="score-meta">{s.jumps}j · {s.steps} steps</div>
+                    <div className="score-meta">{s.steps} steps</div>
                   </div>
                 </div>
               ))}
@@ -528,7 +630,7 @@ function getWsUrl() {
 }
 
 function MPMenuScreen({ playerName, onBack, onRoomJoined, muted, onToggleMute }) {
-  const [mode, setMode] = useState(null); // 'create' | 'join'
+  const [mode, setMode] = useState(null);
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [connecting, setConnecting] = useState(false);
@@ -612,10 +714,6 @@ function MPMenuScreen({ playerName, onBack, onRoomJoined, muted, onToggleMute })
 
 function MPLobbyScreen({ ws, playerId, initialRoom, onGameStarted, onBack, muted, onToggleMute }) {
   const [room, setRoom] = useState(initialRoom);
-  const [jumpCount, setJumpCount] = useState(initialRoom.jumpCount || 3);
-  const [voteStatus, setVoteStatus] = useState(null); // 'waiting' | 'approved' | 'rejected'
-  const [myVote, setMyVote] = useState(null);
-
   const isHost = room.hostId === playerId;
 
   useEffect(() => {
@@ -631,22 +729,6 @@ function MPLobbyScreen({ ws, playerId, initialRoom, onGameStarted, onBack, muted
           setRoom(msg.room);
           if (!muted) SFX.playerLeft();
           break;
-        case 'VOTE_REQUEST':
-          setRoom(msg.room);
-          setVoteStatus('waiting');
-          setMyVote(null);
-          break;
-        case 'VOTE_RESULT':
-          setRoom(msg.room);
-          if (msg.approved) {
-            setVoteStatus('approved');
-            if (!muted) SFX.approved();
-          } else {
-            setVoteStatus('rejected');
-            if (!muted) SFX.rejected();
-            setTimeout(() => setVoteStatus(null), 2000);
-          }
-          break;
         case 'GAME_STARTED':
           onGameStarted(msg.room);
           break;
@@ -657,23 +739,10 @@ function MPLobbyScreen({ ws, playerId, initialRoom, onGameStarted, onBack, muted
     return () => ws.removeEventListener('message', onMsg);
   }, [ws, onGameStarted, muted]);
 
-  function proposeJumps() {
-    ws.send(JSON.stringify({ type: 'SET_JUMPS', jumpCount }));
-  }
-
-  function vote(approve) {
-    setMyVote(approve);
-    if (!muted) SFX.vote();
-    ws.send(JSON.stringify({ type: 'VOTE', approve }));
-  }
-
   function startGame() {
     if (!muted) SFX.gameStart();
     ws.send(JSON.stringify({ type: 'START_GAME' }));
   }
-
-  const nonHostPlayers = room.players.filter(p => p.id !== room.hostId);
-  const voteCount = Object.keys(room.votes || {}).length;
 
   return (
     <div className="screen">
@@ -696,66 +765,13 @@ function MPLobbyScreen({ ws, playerId, initialRoom, onGameStarted, onBack, muted
 
         <div className="divider" />
 
-        {/* Host: set jumps + propose */}
-        {isHost && (room.state === 'lobby' || room.state === 'voting') && voteStatus !== 'approved' && (
-          <div>
-            <label style={{ textAlign: 'center', display: 'block' }}>Propose number of jumps</label>
-            <div className="jump-counter">
-              <button className="jump-btn" onClick={() => setJumpCount(j => Math.max(1, j - 1))} disabled={jumpCount <= 1}>−</button>
-              <div className="jump-value">{jumpCount}</div>
-              <button className="jump-btn" onClick={() => setJumpCount(j => Math.min(6, j + 1))} disabled={jumpCount >= 6}>+</button>
-            </div>
-            <div className="jump-label">
-              {jumpCount === 1 ? 'Easy' : jumpCount === 2 ? 'Medium' : jumpCount <= 4 ? 'Hard' : 'Insane'}
-            </div>
-            {voteStatus === 'rejected' && (
-              <div className="mp-error" style={{ marginBottom: '0.75rem' }}>Players rejected — try a different count!</div>
-            )}
-            <button className="btn btn-primary"
-              onClick={proposeJumps}
-              disabled={room.state === 'voting' && voteStatus === 'waiting'}
-            >
-              {room.state === 'voting' && voteStatus === 'waiting'
-                ? `Waiting for votes… (${voteCount}/${nonHostPlayers.length})`
-                : 'Propose Jumps'}
-            </button>
-          </div>
-        )}
-
-        {/* Host: approved, can start */}
-        {isHost && voteStatus === 'approved' && (
-          <div>
-            <div style={{ textAlign: 'center', color: '#34d399', marginBottom: '1rem', fontFamily: 'Orbitron', fontSize: '0.9rem' }}>
-              ✓ All players approved {room.jumpCount} jump{room.jumpCount > 1 ? 's' : ''}!
-            </div>
-            <button className="btn btn-primary" onClick={startGame}>🎲 Random &amp; Play!</button>
-          </div>
-        )}
-
-        {/* Non-host: voting */}
-        {!isHost && room.state === 'voting' && voteStatus === 'waiting' && myVote === null && (
-          <div>
-            <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
-              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Host proposes</div>
-              <div className="jump-value" style={{ fontSize: '3rem' }}>{room.jumpCount}</div>
-              <div className="jump-label">{room.jumpCount === 1 ? 'Easy' : room.jumpCount === 2 ? 'Medium' : room.jumpCount <= 4 ? 'Hard' : 'Insane'} difficulty</div>
-            </div>
-            <div className="btn-row">
-              <button className="btn btn-approve" onClick={() => vote(true)}>✓ Approve</button>
-              <button className="btn btn-reject" onClick={() => vote(false)}>✗ Reject</button>
-            </div>
-          </div>
-        )}
-
-        {!isHost && myVote !== null && voteStatus === 'waiting' && (
-          <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.45)', padding: '1rem 0', fontSize: '0.85rem', letterSpacing: '2px' }}>
-            {myVote ? 'You approved ✓' : 'You rejected ✗'} — waiting for others…
-          </div>
-        )}
-
-        {!isHost && room.state === 'lobby' && (
+        {isHost ? (
+          <button className="btn btn-primary" onClick={startGame} disabled={room.players.length < 2}>
+            🎲 Start Game!
+          </button>
+        ) : (
           <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.35)', padding: '1rem 0', fontSize: '0.8rem', letterSpacing: '2px', textTransform: 'uppercase' }}>
-            Waiting for host to propose jumps…
+            Waiting for host to start…
           </div>
         )}
 
@@ -780,28 +796,21 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
   const [rawTime, setRawTime] = useState(0);
   const [eliminated, setEliminated] = useState(false);
   const [lastEvent, setLastEvent] = useState('');
+  const [mpPhase, setMpPhase] = useState('cups'); // 'cups' | 'playing'
+  const [currentJump, setCurrentJump] = useState(null);
 
   const timerRef = useRef(null);
-  const startRef = useRef(null);
-  const durationRef = useRef(null);
   const isMyTurn = activePlayerId === playerId;
 
-  const jumpValues = room.jumpValues;
-  const jumpCount = room.jumpCount;
-  const nextJump = jumpValues[currentStep % jumpCount];
-  const expectedAnswer = currentNumber + nextJump;
-
-  // Start / stop timer when turn changes
-  const startTimer = useCallback((step) => {
+  const startTimer = useCallback((forStep) => {
     clearInterval(timerRef.current);
-    const dur = getTimerDuration(step);
-    durationRef.current = dur;
-    startRef.current = Date.now();
+    const dur = getTimerDuration(forStep);
+    const start = Date.now();
     setRawTime(dur);
     setTimeLeft(1);
 
     timerRef.current = setInterval(() => {
-      const elapsed = Date.now() - startRef.current;
+      const elapsed = Date.now() - start;
       const remaining = Math.max(0, dur - elapsed);
       setTimeLeft(remaining / dur);
       setRawTime(remaining);
@@ -823,15 +832,17 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
           setCurrentNumber(msg.currentNumber);
           setCurrentStep(msg.currentStep);
           setActivePlayerId(msg.currentPlayerId);
+          setCurrentJump(null);
           setInput('');
           setLastEvent('');
-          if (msg.currentPlayerId === playerId) {
-            if (!muted) SFX.gameStart();
-            startTimer(msg.currentStep);
-          } else {
-            clearInterval(timerRef.current);
-            setTimeLeft(1);
-          }
+          setMpPhase('cups');
+          clearInterval(timerRef.current);
+          setTimeLeft(1);
+          if (msg.currentPlayerId === playerId && !muted) SFX.gameStart();
+          break;
+        case 'CUP_REVEALED':
+          setCurrentJump(msg.number);
+          setMpPhase('playing');
           break;
         case 'ANSWER_RESULT':
           setRoom(msg.room);
@@ -868,15 +879,22 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
     }
     ws.addEventListener('message', onMsg);
     return () => { ws.removeEventListener('message', onMsg); clearInterval(timerRef.current); };
-  }, [ws, playerId, startTimer, onGameOver, muted]);
+  }, [ws, playerId, onGameOver, muted]);
+
+  function handleCupPicked(number) {
+    setCurrentJump(number);
+    setMpPhase('playing');
+    startTimer(currentStep);
+    ws.send(JSON.stringify({ type: 'CUP_PICKED', number }));
+  }
 
   function handleSubmit() {
-    if (!isMyTurn || eliminated) return;
+    if (!isMyTurn || eliminated || currentJump === null) return;
     const val = parseInt(input, 10);
     if (isNaN(val)) return;
     clearInterval(timerRef.current);
     ws.send(JSON.stringify({ type: 'SUBMIT_ANSWER', answer: val }));
-    if (val !== expectedAnswer) {
+    if (val !== currentNumber + currentJump) {
       setInputErr(true);
       setTimeout(() => setInputErr(false), 500);
     }
@@ -894,7 +912,6 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
       <Confetti active={confetti} />
 
       <div className="card">
-        {/* Players alive row */}
         <div className="mp-alive-row">
           {room.players.map(p => (
             <div key={p.id} className={`mp-alive-chip ${!p.alive ? 'mp-dead' : ''} ${p.id === activePlayerId ? 'mp-active-chip' : ''}`}>
@@ -904,8 +921,7 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
           ))}
         </div>
 
-        {/* Timer — only shown when it's your turn */}
-        {isMyTurn && !eliminated && (
+        {isMyTurn && !eliminated && mpPhase === 'playing' && (
           <div className="timer-container">
             <div className="timer-meta">
               <span>Your turn!</span>
@@ -917,7 +933,13 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
           </div>
         )}
 
-        {!isMyTurn && !eliminated && activePlayerId && (
+        {!isMyTurn && !eliminated && activePlayerId && mpPhase === 'cups' && (
+          <div className="mp-waiting-banner">
+            🎯 {activeName} is picking a cup…
+          </div>
+        )}
+
+        {!isMyTurn && !eliminated && activePlayerId && mpPhase === 'playing' && (
           <div className="mp-waiting-banner">
             ⏳ {activeName}'s turn…
           </div>
@@ -929,33 +951,30 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
           </div>
         )}
 
-        {lastEvent && (
-          <div className="mp-event">{lastEvent}</div>
-        )}
-
-        {/* Jump pattern */}
-        <div style={{ textAlign: 'center', fontSize: '0.72rem', letterSpacing: '2px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)', marginBottom: '0.3rem' }}>Jump pattern</div>
-        <div className="jumps-display">
-          {jumpValues.map((v, i) => (
-            <div key={i} className="jump-chip" style={i === currentStep % jumpCount ? { borderColor: '#60a5fa', color: '#60a5fa', background: 'rgba(96,165,250,0.15)' } : {}}>
-              +{v}
-            </div>
-          ))}
-        </div>
+        {lastEvent && <div className="mp-event">{lastEvent}</div>}
 
         <div className="current-number-label">Current total</div>
         <div className="big-number">{currentNumber}</div>
 
-        <div className="next-prompt">
-          Add <strong>+{nextJump}</strong> → what is the next number?
-        </div>
+        {mpPhase === 'cups' && isMyTurn && !eliminated && (
+          <CupShufflePhase key={currentStep} onNumberRevealed={handleCupPicked} muted={muted} />
+        )}
 
-        <CustomKeyboard
-          value={input}
-          onChange={setInput}
-          onSubmit={handleSubmit}
-          disabled={!isMyTurn || eliminated || inputErr}
-        />
+        {mpPhase === 'playing' && currentJump !== null && (
+          <>
+            <div className="next-prompt">
+              Add <strong>+{currentJump}</strong> → what is the next number?
+            </div>
+            {isMyTurn && !eliminated && (
+              <CustomKeyboard
+                value={input}
+                onChange={setInput}
+                onSubmit={handleSubmit}
+                disabled={inputErr}
+              />
+            )}
+          </>
+        )}
 
         <div className="streak" style={{ marginTop: '0.75rem' }}>
           {alivePlayers.length} player{alivePlayers.length !== 1 ? 's' : ''} remaining · step {currentStep + 1}
@@ -1011,17 +1030,14 @@ function MPWinnerScreen({ winnerId, room, playerId, onMenu, muted, onToggleMute 
 export default function App() {
   const [screen, setScreen] = useState('name');
   const [playerName, setPlayerName] = useState('');
-  const [jumpCount, setJumpCount] = useState(1);
   const [gameResult, setGameResult] = useState(null);
   const [muted, setMuted] = useState(false);
 
-  // Multiplayer state
   const [mpWs, setMpWs] = useState(null);
   const [mpPlayerId, setMpPlayerId] = useState(null);
   const [mpRoom, setMpRoom] = useState(null);
   const [mpWinnerId, setMpWinnerId] = useState(null);
 
-  // Start background music on first interaction
   const musicStarted = useRef(false);
   useEffect(() => {
     function tryStart() {
@@ -1045,38 +1061,21 @@ export default function App() {
   const commonProps = { muted, onToggleMute: toggleMute };
 
   function handleName(name) { setPlayerName(name); setScreen('setup'); }
-
-  function handlePlay(jumps) { setJumpCount(jumps); setScreen('game'); }
-
-  function handleGameOver(steps, jumpValues) {
-    setGameResult({ steps, jumpValues });
-    setScreen('gameover');
-  }
+  function handlePlay() { setScreen('game'); }
+  function handleGameOver(steps) { setGameResult({ steps }); setScreen('gameover'); }
 
   function handleMpRoomJoined(ws, pid, room) {
-    setMpWs(ws);
-    setMpPlayerId(pid);
-    setMpRoom(room);
+    setMpWs(ws); setMpPlayerId(pid); setMpRoom(room);
     if (!muted) SFX.playerJoined();
     setScreen('mp-lobby');
   }
 
-  function handleMpGameStarted(room) {
-    setMpRoom(room);
-    setScreen('mp-game');
-  }
-
-  function handleMpGameOver(winnerId, room) {
-    setMpWinnerId(winnerId);
-    setMpRoom(room);
-    setScreen('mp-winner');
-  }
+  function handleMpGameStarted(room) { setMpRoom(room); setScreen('mp-game'); }
+  function handleMpGameOver(winnerId, room) { setMpWinnerId(winnerId); setMpRoom(room); setScreen('mp-winner'); }
 
   function leaveMp() {
     if (mpWs) { try { mpWs.close(); } catch {} setMpWs(null); }
-    setMpRoom(null);
-    setMpPlayerId(null);
-    setMpWinnerId(null);
+    setMpRoom(null); setMpPlayerId(null); setMpWinnerId(null);
     setScreen('setup');
   }
 
@@ -1090,13 +1089,12 @@ export default function App() {
   );
 
   if (screen === 'game') return (
-    <GameScreen key={Date.now()} playerName={playerName} jumpCount={jumpCount}
+    <GameScreen key={Date.now()} playerName={playerName}
       onGameOver={handleGameOver} {...commonProps} />
   );
 
   if (screen === 'gameover') return (
     <GameOverScreen playerName={playerName} steps={gameResult.steps}
-      jumpCount={jumpCount} jumpValues={gameResult.jumpValues}
       onPlayAgain={() => { setGameResult(null); setScreen('game'); }}
       onMenu={() => { setGameResult(null); setScreen('setup'); }}
       {...commonProps} />
