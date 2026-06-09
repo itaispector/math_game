@@ -35,6 +35,7 @@ function roomView(room) {
     currentPlayerIndex: room.currentPlayerIndex,
     currentNumber: room.currentNumber,
     currentStep: room.currentStep,
+    rematchVotes: room.rematchVotes || {},
   };
 }
 
@@ -64,9 +65,22 @@ function checkGameOver(room) {
   const alive = room.players.filter(p => p.alive);
   if (alive.length <= 1) {
     room.state = 'finished';
+    room.rematchVotes = {};
     return alive[0] || null;
   }
   return null;
+}
+
+function startNewGame(room) {
+  room.state = 'playing';
+  room.currentNumber = 0;
+  room.currentStep = 0;
+  room.currentPlayerIndex = 0;
+  room.currentJump = null;
+  room.rematchVotes = {};
+  room.players.forEach(p => { p.alive = true; });
+  broadcast(room, { type: 'GAME_STARTED', room: roomView(room) });
+  broadcastTurnStart(room, 300);
 }
 
 function broadcastTurnStart(room, delay) {
@@ -110,7 +124,7 @@ function handleMsg(ws, msg) {
         code, state: 'lobby', hostId: ws.id,
         players: [player],
         currentPlayerIndex: 0, currentNumber: 0, currentStep: 0,
-        currentJump: null, currentCupNumbers: [],
+        currentJump: null, currentCupNumbers: [], rematchVotes: {},
       };
       rooms.set(code, room);
       clientRoom.set(ws, code);
@@ -136,14 +150,20 @@ function handleMsg(ws, msg) {
       const room = rooms.get(clientRoom.get(ws));
       if (!room || room.hostId !== ws.id) return;
       if (room.state !== 'lobby') return;
-      room.state = 'playing';
-      room.currentNumber = 0;
-      room.currentStep = 0;
-      room.currentPlayerIndex = 0;
-      room.currentJump = null;
-      room.players.forEach(p => { p.alive = true; });
-      broadcast(room, { type: 'GAME_STARTED', room: roomView(room) });
-      broadcastTurnStart(room, 300);
+      startNewGame(room);
+      break;
+    }
+
+    case 'VOTE_REMATCH': {
+      const room = rooms.get(clientRoom.get(ws));
+      if (!room || room.state !== 'finished') return;
+      room.rematchVotes[ws.id] = true;
+      const allVoted = room.players.length >= 2 && room.players.every(p => room.rematchVotes[p.id]);
+      if (allVoted) {
+        startNewGame(room);
+      } else {
+        broadcast(room, { type: 'REMATCH_VOTE_UPDATE', room: roomView(room) });
+      }
       break;
     }
 
@@ -233,6 +253,14 @@ function handleLeave(ws, notify) {
       const winner = checkGameOver(room);
       if (winner) {
         setTimeout(() => broadcast(room, { type: 'GAME_OVER', winnerId: winner.id, room: roomView(room) }), 300);
+        return;
+      }
+    } else if (room.state === 'finished') {
+      // A player who hadn't voted yet just left — check if everyone remaining voted
+      const allVoted = room.players.length >= 2 && room.players.every(p => room.rematchVotes[p.id]);
+      if (allVoted) {
+        broadcast(room, { type: 'PLAYER_LEFT', playerId: removed.id, room: roomView(room) });
+        startNewGame(room);
         return;
       }
     }

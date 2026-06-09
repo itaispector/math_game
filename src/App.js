@@ -984,7 +984,9 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
   );
 }
 
-function MPWinnerScreen({ winnerId, room, playerId, onMenu, muted, onToggleMute }) {
+function MPWinnerScreen({ ws, winnerId, room: initialRoom, playerId, onRematch, onMenu, muted, onToggleMute }) {
+  const [room, setRoom] = useState(initialRoom);
+  const [myVote, setMyVote] = useState(false);
   const winner = room.players.find(p => p.id === winnerId);
   const isWinner = winnerId === playerId;
 
@@ -994,6 +996,35 @@ function MPWinnerScreen({ winnerId, room, playerId, onMenu, muted, onToggleMute 
       else SFX.gameFail();
     }
   }, [isWinner, muted]);
+
+  useEffect(() => {
+    if (!ws) return;
+    function onMsg(e) {
+      const msg = JSON.parse(e.data);
+      switch (msg.type) {
+        case 'REMATCH_VOTE_UPDATE':
+        case 'PLAYER_LEFT':
+          setRoom(msg.room);
+          if (msg.type === 'PLAYER_LEFT' && !muted) SFX.playerLeft();
+          break;
+        case 'GAME_STARTED':
+          onRematch(msg.room);
+          break;
+        default: break;
+      }
+    }
+    ws.addEventListener('message', onMsg);
+    return () => ws.removeEventListener('message', onMsg);
+  }, [ws, onRematch, muted]);
+
+  function voteRematch() {
+    setMyVote(true);
+    ws.send(JSON.stringify({ type: 'VOTE_REMATCH' }));
+  }
+
+  const votes = room.rematchVotes || {};
+  const readyCount = room.players.filter(p => votes[p.id]).length;
+  const total = room.players.length;
 
   return (
     <div className="screen">
@@ -1005,21 +1036,46 @@ function MPWinnerScreen({ winnerId, room, playerId, onMenu, muted, onToggleMute 
           {isWinner ? '🏆 You Win!' : '🎮 Game Over'}
         </div>
         {winner && (
-          <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+          <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
             <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.8rem', letterSpacing: '3px', textTransform: 'uppercase', marginBottom: '0.4rem' }}>Winner</div>
             <div style={{ fontFamily: 'Orbitron', fontSize: '1.8rem', fontWeight: 900, color: '#fbbf24' }}>{winner.name}</div>
           </div>
         )}
+
         <div className="divider" />
-        <div className="section-title" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>Final standings</div>
-        {room.players.map((p, i) => (
-          <div key={p.id} className="mp-player-row" style={{ padding: '0.4rem 0' }}>
-            <span style={{ color: p.alive ? '#fbbf24' : '#f87171', marginRight: '0.5rem' }}>{p.alive ? '👑' : '💀'}</span>
-            <span className="mp-player-name">{p.name}</span>
-            {p.id === playerId && <span className="mp-badge you">YOU</span>}
-          </div>
-        ))}
-        <button className="btn btn-primary" style={{ marginTop: '1.5rem', width: '100%' }} onClick={onMenu}>← Main Menu</button>
+        <div className="section-title" style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>Play again?</div>
+
+        <div className="rematch-list">
+          {room.players.map(p => (
+            <div key={p.id} className="rematch-row">
+              <span className="rematch-name">
+                {p.name}
+                {p.id === playerId && <span className="mp-badge you" style={{ marginLeft: '0.4rem' }}>YOU</span>}
+              </span>
+              <span className={`rematch-status ${votes[p.id] ? 'rematch-ready' : 'rematch-waiting'}`}>
+                {votes[p.id] ? '✓ ready' : 'waiting…'}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {readyCount > 0 && readyCount < total && (
+          <div className="rematch-progress">{readyCount} / {total} ready</div>
+        )}
+
+        <div className="btn-row" style={{ marginTop: '1rem' }}>
+          <button
+            className="btn btn-primary"
+            onClick={voteRematch}
+            disabled={myVote}
+            style={{ flex: 2 }}
+          >
+            {myVote ? `Waiting… (${readyCount}/${total})` : '🎮 Play Again'}
+          </button>
+          <button className="btn btn-ghost" onClick={onMenu} style={{ flex: 1 }}>
+            Leave
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1118,8 +1174,8 @@ export default function App() {
   );
 
   if (screen === 'mp-winner') return (
-    <MPWinnerScreen winnerId={mpWinnerId} room={mpRoom} playerId={mpPlayerId}
-      onMenu={leaveMp} {...commonProps} />
+    <MPWinnerScreen ws={mpWs} winnerId={mpWinnerId} room={mpRoom} playerId={mpPlayerId}
+      onRematch={handleMpGameStarted} onMenu={leaveMp} {...commonProps} />
   );
 
   return null;
