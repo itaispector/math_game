@@ -1416,9 +1416,10 @@ function MPMemoryGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onTo
   );
 }
 
-function MPWinnerScreen({ winnerId, room, playerId, onMenu, muted, onToggleMute }) {
+function MPWinnerScreen({ winnerId, room, playerId, ws, onPlayAgain, onMenu, muted, onToggleMute }) {
   const winner = room.players.find(p => p.id === winnerId);
   const isWinner = winnerId === playerId;
+  const isHost = room.hostId === playerId;
 
   useEffect(() => {
     if (!muted) {
@@ -1426,6 +1427,16 @@ function MPWinnerScreen({ winnerId, room, playerId, onMenu, muted, onToggleMute 
       else SFX.gameFail();
     }
   }, [isWinner, muted]);
+
+  useEffect(() => {
+    if (!ws) return;
+    function onMsg(e) {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'ROOM_RESET') onPlayAgain(msg.room);
+    }
+    ws.addEventListener('message', onMsg);
+    return () => ws.removeEventListener('message', onMsg);
+  }, [ws, onPlayAgain]);
 
   return (
     <div className="screen">
@@ -1451,7 +1462,17 @@ function MPWinnerScreen({ winnerId, room, playerId, onMenu, muted, onToggleMute 
             {p.id === playerId && <span className="mp-badge you">YOU</span>}
           </div>
         ))}
-        <button className="btn btn-primary" style={{ marginTop: '1.5rem', width: '100%' }} onClick={onMenu}>← Main Menu</button>
+        {isHost ? (
+          <button className="btn btn-primary" style={{ marginTop: '1.5rem', width: '100%' }}
+            onClick={() => ws.send(JSON.stringify({ type: 'PLAY_AGAIN' }))}>
+            🔄 Play Again
+          </button>
+        ) : (
+          <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.35)', padding: '1rem 0', fontSize: '0.8rem', letterSpacing: '2px', textTransform: 'uppercase' }}>
+            Waiting for host…
+          </div>
+        )}
+        <button className="btn btn-secondary" style={{ marginTop: '0.75rem', width: '100%' }} onClick={onMenu}>← Main Menu</button>
       </div>
     </div>
   );
@@ -1613,6 +1634,7 @@ export default function App() {
 
   if (screen === 'mp-winner') return (
     <MPWinnerScreen winnerId={mpWinnerId} room={mpRoom} playerId={mpPlayerId}
+      ws={mpWs} onPlayAgain={(newRoom) => { setMpRoom(newRoom); setScreen('mp-lobby'); }}
       onMenu={leaveMp} {...commonProps} />
   );
 
