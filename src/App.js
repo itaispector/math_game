@@ -51,18 +51,30 @@ const SFX = {
 };
 
 // Background music ─────────────────────────────────────────────────────────────
+// Uses a master gain node so mute/unmute just fades the gain rather than
+// stopping and restarting oscillators (which caused double-play on unmute).
+let bgGainNode = null;
 let bgActive = false;
 let bgTimer = null;
 
+function getBgGain() {
+  const ctx = actx();
+  if (!bgGainNode) {
+    bgGainNode = ctx.createGain();
+    bgGainNode.connect(ctx.destination);
+  }
+  return bgGainNode;
+}
+
 function startBgMusic() {
+  getBgGain().gain.value = 1;
   if (bgActive) return;
   bgActive = true;
   actx().resume().then(scheduleBg);
 }
 
 function stopBgMusic() {
-  bgActive = false;
-  if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
+  if (bgGainNode) bgGainNode.gain.value = 0;
 }
 
 function scheduleBg() {
@@ -86,7 +98,7 @@ function scheduleBg() {
         filt.frequency.value = 900;
         osc.connect(filt);
         filt.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(getBgGain());
         osc.frequency.value = freq;
         osc.type = 'triangle';
         const s = now + ci * beat * 4;
@@ -193,7 +205,7 @@ function CustomKeyboard({ value, onChange, onSubmit, disabled }) {
     if (value.length >= 6) return;
     onChange(value + k);
   }
-  const keys = ['7','8','9','4','5','6','1','2','3','←','0','✓'];
+  const keys = ['1','2','3','4','5','6','7','8','9','←','0','✓'];
   return (
     <div className="custom-kbd">
       <div className={`kbd-display ${disabled ? 'kbd-disabled' : ''}`}>
@@ -227,12 +239,23 @@ function MuteBtn({ muted, onToggle }) {
 
 // ── cup shuffle ───────────────────────────────────────────────────────────────
 
-function CupShufflePhase({ onNumberRevealed, muted }) {
-  const [cups, setCups] = useState(() => [
-    { id: 0, number: randomInt(1, 99), pos: 0 },
-    { id: 1, number: randomInt(1, 99), pos: 1 },
-    { id: 2, number: randomInt(1, 99), pos: 2 },
-  ]);
+function uniqueRandomInts(min, max, count) {
+  const nums = new Set();
+  while (nums.size < count) nums.add(randomInt(min, max));
+  return [...nums];
+}
+
+function CupShufflePhase({ onNumberRevealed, muted, initialNumbers }) {
+  const [cups, setCups] = useState(() => {
+    const nums = (initialNumbers && initialNumbers.length === 3)
+      ? initialNumbers
+      : uniqueRandomInts(1, 99, 3);
+    return [
+      { id: 0, number: nums[0], pos: 0 },
+      { id: 1, number: nums[1], pos: 1 },
+      { id: 2, number: nums[2], pos: 2 },
+    ];
+  });
   const [subPhase, setSubPhase] = useState('reveal');
   const [liftedId, setLiftedId] = useState(null);
   const [xTransMs, setXTransMs] = useState(0);
@@ -289,7 +312,7 @@ function CupShufflePhase({ onNumberRevealed, muted }) {
     setTimeout(() => onNumberRevealed(cup.number), 900);
   }
 
-  const SLOT_W = 104;
+  const SLOT_W = 88;
   const STAGE_W = SLOT_W * 3 - 24;
 
   return (
@@ -330,10 +353,10 @@ function CupShufflePhase({ onNumberRevealed, muted }) {
               </div>
               <div
                 className="cup-body"
-                style={{ transform: isUp ? 'translateY(-130px)' : 'translateY(0)' }}
+                style={{ transform: isUp ? 'translateY(-110px)' : 'translateY(0)' }}
               >
                 <div className="cup-stripe cup-stripe-top" />
-                <div className="cup-star">✡</div>
+                <div className="cup-star">🇮🇱</div>
                 <div className="cup-stripe cup-stripe-bottom" />
               </div>
             </div>
@@ -807,6 +830,7 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
   const [lastEvent, setLastEvent] = useState('');
   const [mpPhase, setMpPhase] = useState('cups'); // 'cups' | 'playing'
   const [currentJump, setCurrentJump] = useState(null);
+  const [mpCupNumbers, setMpCupNumbers] = useState(null);
 
   const timerRef = useRef(null);
   const isMyTurn = activePlayerId === playerId;
@@ -845,6 +869,7 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
           setInput('');
           setLastEvent('');
           setMpPhase('cups');
+          setMpCupNumbers(msg.cupNumbers || null);
           clearInterval(timerRef.current);
           setTimeLeft(1);
           if (msg.currentPlayerId === playerId && !muted) SFX.gameStart();
@@ -966,7 +991,7 @@ function MPGameScreen({ ws, playerId, initialRoom, onGameOver, muted, onToggleMu
         <div className="big-number">{currentNumber}</div>
 
         {mpPhase === 'cups' && isMyTurn && !eliminated && (
-          <CupShufflePhase key={currentStep} onNumberRevealed={handleCupPicked} muted={muted} />
+          <CupShufflePhase key={currentStep} onNumberRevealed={handleCupPicked} muted={muted} initialNumbers={mpCupNumbers} />
         )}
 
         {mpPhase === 'playing' && currentJump !== null && (
@@ -1041,6 +1066,7 @@ export default function App() {
   const [playerName, setPlayerName] = useState('');
   const [gameResult, setGameResult] = useState(null);
   const [muted, setMuted] = useState(false);
+  const [gameKey, setGameKey] = useState(0);
 
   const [mpWs, setMpWs] = useState(null);
   const [mpPlayerId, setMpPlayerId] = useState(null);
@@ -1063,7 +1089,7 @@ export default function App() {
   function toggleMute() {
     setMuted(m => {
       if (!m) { stopBgMusic(); }
-      else { unlockIOSSpeaker(); actx().resume().then(() => { startBgMusic(); musicStarted.current = true; }); }
+      else { startBgMusic(); }
       return !m;
     });
   }
@@ -1071,7 +1097,7 @@ export default function App() {
   const commonProps = { muted, onToggleMute: toggleMute };
 
   function handleName(name) { setPlayerName(name); setScreen('setup'); }
-  function handlePlay() { setScreen('game'); }
+  function handlePlay() { setGameKey(k => k + 1); setScreen('game'); }
   function handleGameOver(steps) { setGameResult({ steps }); setScreen('gameover'); }
 
   function handleMpRoomJoined(ws, pid, room) {
@@ -1099,13 +1125,13 @@ export default function App() {
   );
 
   if (screen === 'game') return (
-    <GameScreen key={Date.now()} playerName={playerName}
+    <GameScreen key={gameKey} playerName={playerName}
       onGameOver={handleGameOver} {...commonProps} />
   );
 
   if (screen === 'gameover') return (
     <GameOverScreen playerName={playerName} steps={gameResult.steps}
-      onPlayAgain={() => { setGameResult(null); setScreen('game'); }}
+      onPlayAgain={() => { setGameResult(null); setGameKey(k => k + 1); setScreen('game'); }}
       onMenu={() => { setGameResult(null); setScreen('setup'); }}
       {...commonProps} />
   );
