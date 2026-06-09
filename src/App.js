@@ -702,14 +702,13 @@ function ScoresScreen({ onBack, muted, onToggleMute }) {
 
 // ── game select screen ────────────────────────────────────────────────────────
 
-function GameSelectScreen({ mode, onJumpMath, onMemoryMan, onBack, muted, onToggleMute }) {
+function GameSelectScreen({ onJumpMath, onMemoryMan, onBack, muted, onToggleMute }) {
   return (
     <div className="screen">
       <Stars />
       <MuteBtn muted={muted} onToggle={onToggleMute} />
       <div className="card">
         <div className="game-title" style={{ fontSize: '1.6rem' }}>Choose Game</div>
-        <div className="game-subtitle">{mode === 'mp' ? 'Multiplayer' : 'Solo Play'}</div>
         <div className="game-select-grid">
           <button className="game-select-card" onClick={onJumpMath}>
             <div className="game-select-icon">🎲</div>
@@ -730,13 +729,35 @@ function GameSelectScreen({ mode, onJumpMath, onMemoryMan, onBack, muted, onTogg
   );
 }
 
+function ModeSelectScreen({ game, playerName, onSolo, onMultiplayer, onBack, muted, onToggleMute }) {
+  const gameLabel = game === 'memoryman' ? 'Memory Man' : 'Jump Math';
+  const gameIcon  = game === 'memoryman' ? '🧠' : '🎲';
+  return (
+    <div className="screen">
+      <Stars />
+      <MuteBtn muted={muted} onToggle={onToggleMute} />
+      <div className="card">
+        <div className="game-title" style={{ fontSize: '1.6rem' }}>{gameIcon} {gameLabel}</div>
+        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+          <span style={{ color: '#a78bfa', fontFamily: 'Orbitron', fontWeight: 700 }}>{playerName}</span>
+          <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.85rem' }}> — how do you want to play?</span>
+        </div>
+        <button className="btn btn-primary" onClick={onSolo}>🎮 Solo</button>
+        <button className="btn btn-mp" style={{ marginTop: '0.75rem', width: '100%' }} onClick={onMultiplayer}>👥 Multiplayer (Local Network)</button>
+        <button className="btn btn-ghost" style={{ width: '100%', marginTop: '0.5rem' }} onClick={onBack}>← Back</button>
+      </div>
+    </div>
+  );
+}
+
 // ── memory man solo screens ───────────────────────────────────────────────────
 
 function MemoryGameScreen({ playerName, onGameOver, muted, onToggleMute }) {
   const [turn, setTurn] = useState(0);
   const [targetNumber, setTargetNumber] = useState(() => randomNDigitNumber(2));
   const [displayPhase, setDisplayPhase] = useState('showing');
-  const [countdown, setCountdown] = useState(5);
+  const [timeLeft, setTimeLeft] = useState(1);
+  const [rawTime, setRawTime] = useState(getTimerDuration(0));
   const [input, setInput] = useState('');
   const [inputErr, setInputErr] = useState(false);
   const [flashCorrect, setFlashCorrect] = useState(false);
@@ -744,12 +765,18 @@ function MemoryGameScreen({ playerName, onGameOver, muted, onToggleMute }) {
 
   // One effect per turn: manages the show→shrink→input progression
   useEffect(() => {
+    const dur = getTimerDuration(turn);
     const startTime = Date.now();
-    const shrinkTimer = setTimeout(() => setDisplayPhase('shrinking'), MEMORY_SHRINK_AT_MS);
-    const inputTimer  = setTimeout(() => setDisplayPhase('input'),    MEMORY_DISPLAY_MS);
+    setTimeLeft(1);
+    setRawTime(dur);
+    setDisplayPhase('showing');
+    const shrinkTimer = setTimeout(() => setDisplayPhase('shrinking'), dur - 500);
+    const inputTimer  = setTimeout(() => setDisplayPhase('input'), dur);
     const tick = setInterval(() => {
-      setCountdown(Math.max(0, Math.ceil((MEMORY_DISPLAY_MS - (Date.now() - startTime)) / 1000)));
-    }, 200);
+      const remaining = Math.max(0, dur - (Date.now() - startTime));
+      setRawTime(remaining);
+      setTimeLeft(remaining / dur);
+    }, 60);
     return () => { clearTimeout(shrinkTimer); clearTimeout(inputTimer); clearInterval(tick); };
   }, [turn]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -765,8 +792,6 @@ function MemoryGameScreen({ playerName, onGameOver, muted, onToggleMute }) {
         const nextTurn = turn + 1;
         setTargetNumber(randomNDigitNumber(nextTurn + 2));
         setInput('');
-        setDisplayPhase('showing');
-        setCountdown(5);
         setTurn(nextTurn);
       }, 600);
     } else {
@@ -777,6 +802,8 @@ function MemoryGameScreen({ playerName, onGameOver, muted, onToggleMute }) {
   }
 
   const digitCount = turn + 2;
+  const timerSecs = (rawTime / 1000).toFixed(1);
+  const barColor = timerColor(timeLeft);
 
   return (
     <div className="screen">
@@ -790,9 +817,23 @@ function MemoryGameScreen({ playerName, onGameOver, muted, onToggleMute }) {
           <div className="stat-label">Round: <span style={{ color: '#60a5fa', fontFamily: 'Orbitron', fontSize: '0.85rem' }}>{turn + 1}</span></div>
         </div>
 
+        {(displayPhase === 'showing' || displayPhase === 'shrinking') && (
+          <div className="timer-container">
+            <div className="timer-meta">
+              <span>Memorize</span>
+              <span style={{ color: barColor, fontFamily: 'Orbitron', fontWeight: 700 }}>{timerSecs}s</span>
+            </div>
+            <div className="timer-bar-bg">
+              <div className="timer-bar" style={{ width: `${timeLeft * 100}%`, background: barColor }} />
+            </div>
+            <div className="speed-indicator" style={{ color: 'rgba(255,255,255,0.25)' }}>
+              {digitCount} digits — round {turn + 1}
+            </div>
+          </div>
+        )}
+
         <div className="memory-turn-info">
           <span>{digitCount}-digit number</span>
-          {displayPhase === 'showing' && <span className="memory-countdown-badge">{countdown}</span>}
         </div>
 
         {(displayPhase === 'showing' || displayPhase === 'shrinking') && (
@@ -1426,7 +1467,7 @@ export default function App() {
   const [muted, setMuted] = useState(false);
   const [gameKey, setGameKey] = useState(0);
   const [memoryGameKey, setMemoryGameKey] = useState(0);
-  const [gameSelectMode, setGameSelectMode] = useState('play'); // 'play' | 'mp'
+  const [selectedGame, setSelectedGame] = useState('jumpmath');
   const [mpGameType, setMpGameType] = useState('jumpmath');
 
   const [mpWs, setMpWs] = useState(null);
@@ -1457,24 +1498,20 @@ export default function App() {
 
   const commonProps = { muted, onToggleMute: toggleMute };
 
-  function handleName(name) { setPlayerName(name); setScreen('setup'); }
+  function handleName(name) { setPlayerName(name); setScreen('game-select'); }
 
-  function handlePlay()        { setGameSelectMode('play'); setScreen('game-select'); }
-  function handleMultiplayer() { setGameSelectMode('mp');   setScreen('game-select'); }
+  function handleSelectJumpMath()  { setSelectedGame('jumpmath');  setScreen('mode-select'); }
+  function handleSelectMemoryMan() { setSelectedGame('memoryman'); setScreen('mode-select'); }
 
-  function handleSelectJumpMath() {
-    if (gameSelectMode === 'play') {
-      SFX.gameStart(); setGameKey(k => k + 1); setScreen('game');
+  function handleModeSelect(mode) {
+    if (mode === 'play') {
+      if (selectedGame === 'jumpmath') {
+        SFX.gameStart(); setGameKey(k => k + 1); setScreen('game');
+      } else {
+        SFX.gameStart(); setMemoryGameKey(k => k + 1); setScreen('memory-game');
+      }
     } else {
-      setMpGameType('jumpmath'); setScreen('mp-menu');
-    }
-  }
-
-  function handleSelectMemoryMan() {
-    if (gameSelectMode === 'play') {
-      SFX.gameStart(); setMemoryGameKey(k => k + 1); setScreen('memory-game');
-    } else {
-      setMpGameType('memoryman'); setScreen('mp-menu');
+      setMpGameType(selectedGame); setScreen('mp-menu');
     }
   }
 
@@ -1497,23 +1534,33 @@ export default function App() {
   function leaveMp() {
     if (mpWs) { try { mpWs.close(); } catch {} setMpWs(null); }
     setMpRoom(null); setMpPlayerId(null); setMpWinnerId(null);
-    setScreen('setup');
+    setScreen('game-select');
   }
 
   if (screen === 'name') return <NameScreen onStart={handleName} {...commonProps} />;
 
-  if (screen === 'setup') return (
-    <SetupScreen playerName={playerName} onPlay={handlePlay}
-      onScores={() => setScreen('scores')}
-      onMultiplayer={handleMultiplayer}
+  if (screen === 'game-select') return (
+    <GameSelectScreen
+      onJumpMath={handleSelectJumpMath}
+      onMemoryMan={handleSelectMemoryMan}
+      onBack={() => setScreen('name')}
       {...commonProps} />
   );
 
-  if (screen === 'game-select') return (
-    <GameSelectScreen mode={gameSelectMode}
-      onJumpMath={handleSelectJumpMath}
-      onMemoryMan={handleSelectMemoryMan}
-      onBack={() => setScreen('setup')}
+  if (screen === 'mode-select') return (
+    <ModeSelectScreen
+      game={selectedGame}
+      playerName={playerName}
+      onSolo={() => handleModeSelect('play')}
+      onMultiplayer={() => handleModeSelect('mp')}
+      onBack={() => setScreen('game-select')}
+      {...commonProps} />
+  );
+
+  if (screen === 'setup') return (
+    <SetupScreen playerName={playerName} onPlay={() => setScreen('game-select')}
+      onScores={() => setScreen('scores')}
+      onMultiplayer={() => setScreen('game-select')}
       {...commonProps} />
   );
 
@@ -1525,7 +1572,7 @@ export default function App() {
   if (screen === 'gameover') return (
     <GameOverScreen playerName={playerName} steps={gameResult.steps}
       onPlayAgain={() => { setGameResult(null); setGameKey(k => k + 1); setScreen('game'); }}
-      onMenu={() => { setGameResult(null); setScreen('setup'); }}
+      onMenu={() => { setGameResult(null); setScreen('game-select'); }}
       {...commonProps} />
   );
 
@@ -1537,11 +1584,11 @@ export default function App() {
   if (screen === 'memory-gameover') return (
     <MemoryGameOverScreen playerName={playerName} turns={memoryResult.turns}
       onPlayAgain={() => { setMemoryResult(null); setMemoryGameKey(k => k + 1); setScreen('memory-game'); }}
-      onMenu={() => { setMemoryResult(null); setScreen('setup'); }}
+      onMenu={() => { setMemoryResult(null); setScreen('game-select'); }}
       {...commonProps} />
   );
 
-  if (screen === 'scores') return <ScoresScreen onBack={() => setScreen('setup')} {...commonProps} />;
+  if (screen === 'scores') return <ScoresScreen onBack={() => setScreen('game-select')} {...commonProps} />;
 
   if (screen === 'mp-menu') return (
     <MPMenuScreen playerName={playerName} gameType={mpGameType}
