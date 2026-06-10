@@ -1067,3 +1067,15 @@ input.error {
   margin-bottom: 0.75rem;
   font-family: 'Orbitron', monospace;
 }
+
+.btn-ready-memory {
+  background: linear-gradient(135deg, #059669, #0891b2);
+  color: white;
+  box-shadow: 0 4px 20px rgba(5,150,105,0.4);
+  width: 100%;
+  margin-top: 1.25rem;
+}
+.btn-ready-memory:hover {
+  box-shadow: 0 6px 28px rgba(5,150,105,0.6);
+  transform: translateY(-1px);
+}
