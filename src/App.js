@@ -194,6 +194,9 @@ function timerColor(pct) {
   return '#f87171';
 }
 
+const MEMORIZE_MS = 10000;
+const INPUT_MS = 15000;
+
 // ── memory man helpers ────────────────────────────────────────────────────────
 
 function formatNumberWithGroups(numStr) {
@@ -757,31 +760,72 @@ function MemoryGameScreen({ playerName, onGameOver, muted, onToggleMute }) {
   const [targetNumber, setTargetNumber] = useState(() => randomNDigitNumber(2));
   const [displayPhase, setDisplayPhase] = useState('showing');
   const [timeLeft, setTimeLeft] = useState(1);
-  const [rawTime, setRawTime] = useState(getTimerDuration(0));
+  const [rawTime, setRawTime] = useState(MEMORIZE_MS);
   const [input, setInput] = useState('');
   const [inputErr, setInputErr] = useState(false);
   const [flashCorrect, setFlashCorrect] = useState(false);
   const [confetti, setConfetti] = useState(false);
 
-  // One effect per turn: manages the show→shrink→input progression
+  const showShrinkRef = useRef(null);
+  const showPhaseRef = useRef(null);
+  const showTickRef = useRef(null);
+  const inputTimeoutRef = useRef(null);
+  const inputTickRef = useRef(null);
+
+  // Show phase: constant 10s per turn
   useEffect(() => {
-    const dur = getTimerDuration(turn);
-    const startTime = Date.now();
-    setTimeLeft(1);
-    setRawTime(dur);
     setDisplayPhase('showing');
-    const shrinkTimer = setTimeout(() => setDisplayPhase('shrinking'), dur - 500);
-    const inputTimer  = setTimeout(() => setDisplayPhase('input'), dur);
-    const tick = setInterval(() => {
-      const remaining = Math.max(0, dur - (Date.now() - startTime));
+    setTimeLeft(1);
+    setRawTime(MEMORIZE_MS);
+    const startTime = Date.now();
+    showShrinkRef.current = setTimeout(() => setDisplayPhase('shrinking'), MEMORIZE_MS - 500);
+    showPhaseRef.current = setTimeout(() => setDisplayPhase('input'), MEMORIZE_MS);
+    showTickRef.current = setInterval(() => {
+      const remaining = Math.max(0, MEMORIZE_MS - (Date.now() - startTime));
       setRawTime(remaining);
-      setTimeLeft(remaining / dur);
+      setTimeLeft(remaining / MEMORIZE_MS);
     }, 60);
-    return () => { clearTimeout(shrinkTimer); clearTimeout(inputTimer); clearInterval(tick); };
+    return () => {
+      clearTimeout(showShrinkRef.current);
+      clearTimeout(showPhaseRef.current);
+      clearInterval(showTickRef.current);
+    };
   }, [turn]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Input phase: constant 15s to type the answer
+  useEffect(() => {
+    if (displayPhase !== 'input') return;
+    setTimeLeft(1);
+    setRawTime(INPUT_MS);
+    const startTime = Date.now();
+    inputTickRef.current = setInterval(() => {
+      const remaining = Math.max(0, INPUT_MS - (Date.now() - startTime));
+      setRawTime(remaining);
+      setTimeLeft(remaining / INPUT_MS);
+    }, 60);
+    inputTimeoutRef.current = setTimeout(() => {
+      clearInterval(inputTickRef.current);
+      onGameOver(turn);
+    }, INPUT_MS);
+    return () => {
+      clearTimeout(inputTimeoutRef.current);
+      clearInterval(inputTickRef.current);
+    };
+  }, [displayPhase]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleReady() {
+    if (displayPhase !== 'showing') return;
+    clearTimeout(showShrinkRef.current);
+    clearTimeout(showPhaseRef.current);
+    clearInterval(showTickRef.current);
+    setDisplayPhase('shrinking');
+    setTimeout(() => setDisplayPhase('input'), 500);
+  }
 
   function handleSubmit() {
     if (displayPhase !== 'input' || !input) return;
+    clearTimeout(inputTimeoutRef.current);
+    clearInterval(inputTickRef.current);
     if (input === targetNumber) {
       if (!muted) SFX.correct();
       setFlashCorrect(true);
@@ -817,20 +861,20 @@ function MemoryGameScreen({ playerName, onGameOver, muted, onToggleMute }) {
           <div className="stat-label">Round: <span style={{ color: '#60a5fa', fontFamily: 'Orbitron', fontSize: '0.85rem' }}>{turn + 1}</span></div>
         </div>
 
-        {(displayPhase === 'showing' || displayPhase === 'shrinking') && (
-          <div className="timer-container">
-            <div className="timer-meta">
-              <span>Memorize</span>
-              <span style={{ color: barColor, fontFamily: 'Orbitron', fontWeight: 700 }}>{timerSecs}s</span>
-            </div>
-            <div className="timer-bar-bg">
-              <div className="timer-bar" style={{ width: `${timeLeft * 100}%`, background: barColor }} />
-            </div>
+        <div className="timer-container">
+          <div className="timer-meta">
+            <span>{displayPhase === 'input' ? 'Type it!' : 'Memorize'}</span>
+            <span style={{ color: barColor, fontFamily: 'Orbitron', fontWeight: 700 }}>{timerSecs}s</span>
+          </div>
+          <div className="timer-bar-bg">
+            <div className="timer-bar" style={{ width: `${timeLeft * 100}%`, background: barColor }} />
+          </div>
+          {(displayPhase === 'showing' || displayPhase === 'shrinking') && (
             <div className="speed-indicator" style={{ color: 'rgba(255,255,255,0.25)' }}>
               {digitCount} digits — round {turn + 1}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         <div className="memory-turn-info">
           <span>{digitCount}-digit number</span>
@@ -840,6 +884,10 @@ function MemoryGameScreen({ playerName, onGameOver, muted, onToggleMute }) {
           <div className={`memory-number-display${displayPhase === 'shrinking' ? ' memory-number-shrink' : ''}`}>
             {formatNumberWithGroups(targetNumber)}
           </div>
+        )}
+
+        {displayPhase === 'showing' && (
+          <button className="btn btn-ready-memory" onClick={handleReady}>I'm ready</button>
         )}
 
         {displayPhase === 'input' && (
